@@ -5,7 +5,7 @@
 # Relay for create-react-app
 It is quite difficult to get relay up and running with create-react-app. Here is a react-script, that you can use to get relay support with your create-react-app app. You can also fork this repo and add other features, this is only meant to provide relay support.
 
-The reason for this fork's existence is explained better in [this Medium article](https://medium.com/@kitze/configure-create-react-app-without-ejecting-d8450e96196a).
+The reason for this fork's existence is explained better in [this PR](https://github.com/facebookincubator/create-react-app/pull/779).
 
 ### Installation
 1. ```npm i -D @valentin-seehausen/react-scripts```
