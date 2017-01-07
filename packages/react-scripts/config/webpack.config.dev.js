@@ -132,6 +132,7 @@ module.exports = {
           /\.html$/,
           /\.(js|jsx)$/,
           /\.css$/,
+          /\.sass$/,
           /\.json$/,
           /\.svg$/
         ],
@@ -157,6 +158,10 @@ module.exports = {
           plugins: relayPlugin.isEnabled() ? [require.resolve('../plugins/relay/babelRelayPlugin')] : [],
           cacheDirectory: true
         }
+      },
+      {
+        test: /\.sass$/,
+        loader: 'style!css?modules&importLoaders=1&localIdentName=[name]__[local]___[hash:base64:5]!postcss!sass'
       },
       // "postcss" loader applies autoprefixer to our CSS.
       // "css" loader resolves paths in CSS and adds assets as dependencies.

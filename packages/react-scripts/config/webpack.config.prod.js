@@ -138,6 +138,7 @@ module.exports = {
           /\.html$/,
           /\.(js|jsx)$/,
           /\.css$/,
+          /\.sass$/,
           /\.json$/,
           /\.svg$/
         ],
@@ -159,6 +160,10 @@ module.exports = {
           plugins: relayPlugin.isEnabled() ? [require.resolve('../plugins/relay/babelRelayPlugin')] : [],
         },
         // @remove-on-eject-end
+      },
+      {
+        test: /\.sass/,
+        loader: ExtractTextPlugin.extract('style', 'css?modules&-autoprefixer&importLoaders=1!postcss!sass')
       },
       // The notation here is somewhat confusing.
       // "postcss" loader applies autoprefixer to our CSS.
