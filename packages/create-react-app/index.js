@@ -40,7 +40,7 @@
 
 var chalk = require('chalk');
 
-var currentNodeVersion = process.versions.node
+var currentNodeVersion = process.versions.node;
 if (currentNodeVersion.split('.')[0] < 4) {
   console.error(
     chalk.red(
@@ -52,6 +52,7 @@ if (currentNodeVersion.split('.')[0] < 4) {
   process.exit(1);
 }
 
+var commander = require('commander');
 var fs = require('fs-extra');
 var path = require('path');
 var execSync = require('child_process').execSync;
@@ -60,7 +61,7 @@ var semver = require('semver');
 
 var projectName;
 
-var program = require('commander')
+var program = commander
   .version(require('./package.json').version)
   .arguments('<project-directory>')
   .usage(chalk.green('<project-directory>') + ' [options]')
@@ -69,6 +70,7 @@ var program = require('commander')
   })
   .option('--verbose', 'print additional logs')
   .option('--scripts-version <alternative-package>', 'use a non-standard version of react-scripts')
+  .allowUnknownOption()
   .on('--help', function () {
     console.log('    Only ' + chalk.green('<project-directory>') + ' is required.');
     console.log();
@@ -82,7 +84,7 @@ var program = require('commander')
     console.log('      ' + chalk.cyan('https://github.com/facebookincubator/create-react-app/issues/new'));
     console.log();
   })
-  .parse(process.argv)
+  .parse(process.argv);
 
 if (typeof projectName === 'undefined') {
   console.error('Please specify the project directory:');
@@ -95,9 +97,14 @@ if (typeof projectName === 'undefined') {
   process.exit(1);
 }
 
-createApp(projectName, program.verbose, program.scriptsVersion);
+var hiddenProgram = new commander.Command()
+  .option('--internal-testing-template <path-to-template>', '(internal usage only, DO NOT RELY ON THIS) ' +
+    'use a non-standard application template')
+  .parse(process.argv)
 
-function createApp(name, verbose, version) {
+createApp(projectName, program.verbose, program.scriptsVersion, hiddenProgram.internalTestingTemplate);
+
+function createApp(name, verbose, version, template) {
   var root = path.resolve(name);
   var appName = path.basename(root);
 
@@ -117,7 +124,7 @@ function createApp(name, verbose, version) {
   var packageJson = {
     name: appName,
     version: '0.1.0',
-    private: true,
+    private: true
   };
   fs.writeFileSync(
     path.join(root, 'package.json'),
@@ -126,31 +133,27 @@ function createApp(name, verbose, version) {
   var originalDirectory = process.cwd();
   process.chdir(root);
 
-  console.log('Installing packages. This might take a couple minutes.');
-  console.log('Installing ' + chalk.cyan('react-scripts') + '...');
-  console.log();
-
-  run(root, appName, version, verbose, originalDirectory);
+  run(root, appName, version, verbose, originalDirectory, template);
 }
 
 function shouldUseYarn() {
   try {
-    execSync('yarn --version', {stdio: 'ignore'});
+    execSync('yarnpkg --version', {stdio: 'ignore'});
     return true;
   } catch (e) {
     return false;
   }
 }
 
-function install(packageToInstall, verbose, callback) {
+function install(dependencies, verbose, callback) {
   var command;
   var args;
   if (shouldUseYarn()) {
-    command = 'yarn';
-    args = [ 'add', '--dev', '--exact', packageToInstall];
+    command = 'yarnpkg';
+    args = [ 'add', '--exact'].concat(dependencies);
   } else {
     command = 'npm';
-    args = ['install', '--save-dev', '--save-exact', packageToInstall];
+    args = ['install', '--save', '--save-exact'].concat(dependencies);
   }
 
   if (verbose) {
@@ -163,17 +166,27 @@ function install(packageToInstall, verbose, callback) {
   });
 }
 
-function run(root, appName, version, verbose, originalDirectory) {
+function run(root, appName, version, verbose, originalDirectory, template) {
   var packageToInstall = getInstallPackage(version);
   var packageName = getPackageName(packageToInstall);
 
-  install(packageToInstall, verbose, function(code, command, args) {
+  var allDependencies = ['react', 'react-dom', packageToInstall];
+
+  console.log('Installing packages. This might take a couple minutes.');
+  console.log('Installing ' + chalk.cyan('react, react-dom, ' + packageName) + '...');
+  console.log();
+
+  install(allDependencies, verbose, function(code, command, args) {
     if (code !== 0) {
       console.error(chalk.cyan(command + ' ' + args.join(' ')) + ' failed');
       process.exit(1);
     }
 
     checkNodeVersion(packageName);
+
+    // Since react-scripts has been installed with --save
+    // We need to move it into devDependencies and rewrite package.json
+    moveReactScriptsToDev(packageName);
 
     var scriptsPath = path.resolve(
       process.cwd(),
@@ -183,7 +196,7 @@ function run(root, appName, version, verbose, originalDirectory) {
       'init.js'
     );
     var init = require(scriptsPath);
-    init(root, appName, verbose, originalDirectory);
+    init(root, appName, verbose, originalDirectory, template);
   });
 }
 
@@ -205,6 +218,11 @@ function getPackageName(installPackage) {
     // The package name could be with or without semver version, e.g. react-scripts-0.2.0-alpha.1.tgz
     // However, this function returns package name only without semver version.
     return installPackage.match(/^.+\/(.+?)(?:-\d+.+)?\.tgz$/)[1];
+  } else if (installPackage.indexOf('git+') === 0) {
+    // Pull package name out of git urls e.g:
+    // git+https://github.com/mycompany/react-scripts.git
+    // git+ssh://github.com/mycompany/react-scripts.git#v1.2.3
+    return installPackage.match(/([^\/]+)\.git(#.*)?$/)[1];
   } else if (installPackage.indexOf('@') > 0) {
     // Do not match @scope/ when stripping off @version or @tag
     return installPackage.charAt(0) + installPackage.substr(1).split('@')[0];
@@ -259,6 +277,33 @@ function checkAppName(appName) {
     );
     process.exit(1);
   }
+}
+
+function moveReactScriptsToDev(packageName) {
+  var packagePath = path.join(process.cwd(), 'package.json');
+  var packageJson = require(packagePath);
+
+  if (typeof packageJson.dependencies === 'undefined') {
+    console.error(
+      chalk.red('Missing dependencies in package.json')
+    );
+    process.exit(1);
+  }
+
+  var packageVersion = packageJson.dependencies[packageName];
+
+  if (typeof packageVersion === 'undefined') {
+    console.error(
+      chalk.red('Unable to find ' + packageName + ' in package.json')
+    );
+    process.exit(1);
+  }
+
+  packageJson.devDependencies = packageJson.devDependencies || {};
+  packageJson.devDependencies[packageName] = packageVersion;
+  delete packageJson.dependencies[packageName];
+
+  fs.writeFileSync(packagePath, JSON.stringify(packageJson, null, 2));
 }
 
 // If project only contains files generated by GH, it’s safe.
